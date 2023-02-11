@@ -39,6 +39,7 @@ All shortcuts/keymaps can be found [in the documentation on the website](https:/
 - New surround motion for indentation levels.
 - New feature for fuzzy/grep search on current buffer.
 - New motion: Moving selected lines up and down
+- New commands: reload! and reload-all!
 
 # Features
 
