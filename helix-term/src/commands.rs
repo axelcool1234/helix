@@ -6074,6 +6074,14 @@ fn select_textobject_impl(cx: &mut Context, objtype: textobject::TextObject, mov
                         'e' => textobject_treesitter("entry", range),
                         'x' => textobject_treesitter("xml-element", range),
                         'p' => textobject::textobject_paragraph(text, range, objtype, count),
+                        'i' => textobject::textobject_indentation_level(
+                            text,
+                            range,
+                            objtype,
+                            count,
+                            doc.indent_width(),
+                            doc.tab_width(),
+                        ),
                         'm' => textobject::textobject_pair_surround_closest(
                             doc.syntax(),
                             text,
@@ -6114,6 +6122,7 @@ fn select_textobject_impl(cx: &mut Context, objtype: textobject::TextObject, mov
         ("w", "Word"),
         ("W", "WORD"),
         ("p", "Paragraph"),
+        ("i", "Indentation level"),
         ("t", "Type definition (tree-sitter)"),
         ("f", "Function (tree-sitter)"),
         ("a", "Argument/parameter (tree-sitter)"),
