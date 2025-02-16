@@ -40,6 +40,7 @@ All shortcuts/keymaps can be found [in the documentation on the website](https:/
 - New feature for fuzzy/grep search on current buffer.
 - New motion: Moving selected lines up and down
 - New commands: reload! and reload-all!
+- New Motion: Reverse repeat last motion and extended versions of repeat last motion and reverse repeat last motion
 
 # Features
 
