@@ -6849,17 +6849,7 @@ fn jump_to_word(cx: &mut Context, behaviour: Movement) {
         let mut changed = false;
         while cursor_fwd.head < end {
             cursor_fwd = movement::move_next_word_end(text, cursor_fwd, 1);
-            // The cursor is on a word that is atleast two graphemes long and
-            // madeup of word characters. The latter condition is needed because
-            // move_next_word_end simply treats a sequence of characters from
-            // the same char class as a word so `=<` would also count as a word.
-            let add_label = text
-                .slice(..cursor_fwd.head)
-                .graphemes_rev()
-                .take(2)
-                .take_while(|g| g.chars().all(char_is_word))
-                .count()
-                == 2;
+            let add_label = add_label(text, cursor_fwd, true);
             if !add_label {
                 continue;
             }
@@ -6877,17 +6867,7 @@ fn jump_to_word(cx: &mut Context, behaviour: Movement) {
         }
         while cursor_rev.head > start {
             cursor_rev = movement::move_prev_word_start(text, cursor_rev, 1);
-            // The cursor is on a word that is atleast two graphemes long and
-            // madeup of word characters. The latter condition is needed because
-            // move_prev_word_start simply treats a sequence of characters from
-            // the same char class as a word so `=<` would also count as a word.
-            let add_label = text
-                .slice(cursor_rev.head..)
-                .graphemes()
-                .take(2)
-                .take_while(|g| g.chars().all(char_is_word))
-                .count()
-                == 2;
+            let add_label = add_label(text, cursor_rev, false);
             if !add_label {
                 continue;
             }
@@ -6908,6 +6888,23 @@ fn jump_to_word(cx: &mut Context, behaviour: Movement) {
         }
     }
     jump_to_label(cx, words, behaviour)
+}
+
+fn add_label(text: RopeSlice<'_>, cursor: Range, rev: bool) -> bool {
+    // The cursor is on a word that is atleast two graphemes long and
+    // madeup of word characters. The latter condition is needed because
+    // move_next_word_end simply treats a sequence of characters from
+    // the same char class as a word so `=<` would also count as a word.
+    let size = 1;
+    if rev {
+        text.slice(..cursor.head).graphemes_rev()
+    } else {
+        text.slice(cursor.head..).graphemes()
+    }
+    .take(size)
+    .take_while(|g| g.chars().all(char_is_word))
+    .count()
+        == size
 }
 
 fn lsp_or_syntax_symbol_picker(cx: &mut Context) {
