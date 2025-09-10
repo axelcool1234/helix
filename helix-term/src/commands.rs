@@ -6725,7 +6725,6 @@ fn extend_to_word(cx: &mut Context) {
 }
 
 fn jump_to_label(cx: &mut Context, labels: Vec<Range>, behaviour: Movement) {
-    let doc = doc!(cx.editor);
     let alphabet = &cx.editor.config().jump_label_alphabet;
     if labels.is_empty() {
         return;
@@ -6737,79 +6736,53 @@ fn jump_to_label(cx: &mut Context, labels: Vec<Range>, behaviour: Movement) {
     };
 
     // Add label for each jump candidate to the View as virtual text.
-    let text = doc.text().slice(..);
     let mut overlays: Vec<_> = labels
         .iter()
         .enumerate()
-        .flat_map(|(i, range)| {
-            [
-                Overlay::new(range.from(), alphabet_char(i / alphabet.len())),
-                Overlay::new(
-                    graphemes::next_grapheme_boundary(text, range.from()),
-                    alphabet_char(i % alphabet.len()),
-                ),
-            ]
-        })
+        .map(|(i, range)| Overlay::new(range.from(), alphabet_char(i)))
         .collect();
     overlays.sort_unstable_by_key(|overlay| overlay.char_idx);
     let (view, doc) = current!(cx.editor);
     doc.set_jump_labels(view.id, overlays);
 
-    // Accept two characters matching a visible label. Jump to the candidate
+    // Accept one character matching a visible label. Jump to the candidate
     // for that label if it exists.
     let primary_selection = doc.selection(view.id).primary();
     let view = view.id;
     let doc = doc.id();
     cx.on_next_key(move |cx, event| {
+        doc_mut!(cx.editor, &doc).remove_jump_labels(view);
         let alphabet = &cx.editor.config().jump_label_alphabet;
         let Some(i) = event
             .char()
             .filter(|_| event.modifiers.is_empty())
             .and_then(|ch| alphabet.iter().position(|&it| it == ch))
         else {
-            doc_mut!(cx.editor, &doc).remove_jump_labels(view);
             return;
         };
-        let outer = i * alphabet.len();
-        // Bail if the given character cannot be a jump label.
-        if outer > labels.len() {
-            doc_mut!(cx.editor, &doc).remove_jump_labels(view);
-            return;
-        }
-        cx.on_next_key(move |cx, event| {
-            doc_mut!(cx.editor, &doc).remove_jump_labels(view);
-            let alphabet = &cx.editor.config().jump_label_alphabet;
-            let Some(inner) = event
-                .char()
-                .filter(|_| event.modifiers.is_empty())
-                .and_then(|ch| alphabet.iter().position(|&it| it == ch))
-            else {
-                return;
-            };
-            if let Some(mut range) = labels.get(outer + inner).copied() {
-                range = if behaviour == Movement::Extend {
-                    let anchor = if range.anchor < range.head {
-                        let from = primary_selection.from();
-                        if range.anchor < from {
-                            range.anchor
-                        } else {
-                            from
-                        }
+        if let Some(mut range) = labels.get(i).copied() {
+            range = if behaviour == Movement::Extend {
+                let anchor = if range.anchor < range.head {
+                    let from = primary_selection.from();
+                    if range.anchor < from {
+                        range.anchor
                     } else {
-                        let to = primary_selection.to();
-                        if range.anchor > to {
-                            range.anchor
-                        } else {
-                            to
-                        }
-                    };
-                    Range::new(anchor, range.head)
+                        from
+                    }
                 } else {
-                    range.with_direction(Direction::Forward)
+                    let to = primary_selection.to();
+                    if range.anchor > to {
+                        range.anchor
+                    } else {
+                        to
+                    }
                 };
-                doc_mut!(cx.editor, &doc).set_selection(view, range.into());
-            }
-        });
+                Range::new(anchor, range.head)
+            } else {
+                range.with_direction(Direction::Forward)
+            };
+            doc_mut!(cx.editor, &doc).set_selection(view, range.into());
+        }
     });
 }
 
@@ -6829,14 +6802,14 @@ fn jump_to_word(cx: &mut Context, behaviour: Movement) {
 
 fn _jump_to_word(cx: &mut Context, behaviour: Movement, first_char: char) {
     let acceptable_char = |ch| char_is_word(ch) || char_is_punctuation(ch);
-    // Calculate the jump candidates: ranges for any visible words with two or
+    // Calculate the jump candidates: ranges for any visible words with one or
     // more characters.
     let alphabet = &cx.editor.config().jump_label_alphabet;
     if alphabet.is_empty() {
         return;
     }
 
-    let jump_label_limit = alphabet.len() * alphabet.len();
+    let jump_label_limit = alphabet.len();
     let mut words = Vec::with_capacity(jump_label_limit);
     let (view, doc) = current_ref!(cx.editor);
     let text = doc.text().slice(..);
@@ -6924,10 +6897,8 @@ fn add_label<F>(text: RopeSlice<'_>, cursor: Range, acceptable_char: F, rev: boo
 where
     F: Fn(char) -> bool,
 {
-    // The cursor is on a word that is atleast two graphemes long and
-    // madeup of word characters. The latter condition is needed because
-    // move_next_word_end simply treats a sequence of characters from
-    // the same char class as a word so `=<` would also count as a word.
+    // The cursor is on a word that is atleast one grapheme long and
+    // madeup of acceptable characters.
     let size = 1;
     if rev {
         text.slice(..cursor.head).graphemes_rev()
