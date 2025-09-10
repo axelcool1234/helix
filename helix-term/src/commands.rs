@@ -21,6 +21,7 @@ pub use typed::*;
 
 use helix_core::{
     char_idx_at_visual_offset,
+    chars::char_is_punctuation,
     chars::char_is_word,
     command_line::{self, Args},
     comment,
@@ -6813,6 +6814,21 @@ fn jump_to_label(cx: &mut Context, labels: Vec<Range>, behaviour: Movement) {
 }
 
 fn jump_to_word(cx: &mut Context, behaviour: Movement) {
+    cx.on_next_key(move |cx, event| {
+        let first_char = match event {
+            KeyEvent {
+                code: KeyCode::Char(ch),
+                modifiers,
+                ..
+            } if modifiers.is_empty() => ch,
+            _ => return, // bail if not a plain character
+        };
+        _jump_to_word(cx, behaviour, first_char);
+    });
+}
+
+fn _jump_to_word(cx: &mut Context, behaviour: Movement, first_char: char) {
+    let acceptable_char = |ch| char_is_word(ch) || char_is_punctuation(ch);
     // Calculate the jump candidates: ranges for any visible words with two or
     // more characters.
     let alphabet = &cx.editor.config().jump_label_alphabet;
@@ -6849,16 +6865,23 @@ fn jump_to_word(cx: &mut Context, behaviour: Movement) {
         let mut changed = false;
         while cursor_fwd.head < end {
             cursor_fwd = movement::move_next_word_end(text, cursor_fwd, 1);
-            let add_label = add_label(text, cursor_fwd, true);
+            let add_label = add_label(text, cursor_fwd, acceptable_char, true);
             if !add_label {
                 continue;
             }
-            changed = true;
+
             // skip any leading whitespace
             cursor_fwd.anchor += text
                 .chars_at(cursor_fwd.anchor)
-                .take_while(|&c| !char_is_word(c))
+                .take_while(|&c| !acceptable_char(c))
                 .count();
+
+            // filter: only keep words whose first visible char matches `first_char`
+            if text.get_char(cursor_fwd.anchor) != Some(first_char) {
+                continue;
+            }
+            changed = true;
+
             words.push(cursor_fwd);
             if words.len() == jump_label_limit {
                 break 'outer;
@@ -6867,16 +6890,23 @@ fn jump_to_word(cx: &mut Context, behaviour: Movement) {
         }
         while cursor_rev.head > start {
             cursor_rev = movement::move_prev_word_start(text, cursor_rev, 1);
-            let add_label = add_label(text, cursor_rev, false);
+            let add_label = add_label(text, cursor_rev, acceptable_char, false);
             if !add_label {
                 continue;
             }
-            changed = true;
+
             cursor_rev.anchor -= text
                 .chars_at(cursor_rev.anchor)
                 .reversed()
-                .take_while(|&c| !char_is_word(c))
+                .take_while(|&c| !acceptable_char(c))
                 .count();
+
+            // filter: only keep words whose first visible char matches `first_char`
+            if text.get_char(cursor_rev.head) != Some(first_char) {
+                continue;
+            }
+            changed = true;
+
             words.push(cursor_rev);
             if words.len() == jump_label_limit {
                 break 'outer;
@@ -6890,7 +6920,10 @@ fn jump_to_word(cx: &mut Context, behaviour: Movement) {
     jump_to_label(cx, words, behaviour)
 }
 
-fn add_label(text: RopeSlice<'_>, cursor: Range, rev: bool) -> bool {
+fn add_label<F>(text: RopeSlice<'_>, cursor: Range, acceptable_char: F, rev: bool) -> bool
+where
+    F: Fn(char) -> bool,
+{
     // The cursor is on a word that is atleast two graphemes long and
     // madeup of word characters. The latter condition is needed because
     // move_next_word_end simply treats a sequence of characters from
@@ -6902,7 +6935,7 @@ fn add_label(text: RopeSlice<'_>, cursor: Range, rev: bool) -> bool {
         text.slice(cursor.head..).graphemes()
     }
     .take(size)
-    .take_while(|g| g.chars().all(char_is_word))
+    .take_while(|g| g.chars().all(|c| acceptable_char(c)))
     .count()
         == size
 }
