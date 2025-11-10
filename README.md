@@ -34,6 +34,7 @@ All shortcuts/keymaps can be found [in the documentation on the website](https:/
 - New motion: [Flash.nvim](https://github.com/folke/flash.nvim) style jump motion (`goto_word_flash` and `extend_to_word_flash`).
 - Surround motions can now extend in select mode.
 - Surround motions are fixed for `mdm`.
+- In insert mode, matching brackets are highlighted when inserting the closing bracket.
 
 # Features
 
