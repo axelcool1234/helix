@@ -257,12 +257,15 @@
 | `align_view_bottom` | Align view bottom | normal: `` Zb ``, `` zb ``, select: `` Zb ``, `` zb `` |
 | `scroll_up` | Scroll view up | normal: `` Zk ``, `` zk ``, `` Z<up> ``, `` z<up> ``, select: `` Zk ``, `` zk ``, `` Z<up> ``, `` z<up> `` |
 | `scroll_down` | Scroll view down | normal: `` Zj ``, `` zj ``, `` Z<down> ``, `` z<down> ``, select: `` Zj ``, `` zj ``, `` Z<down> ``, `` z<down> `` |
-| `match_brackets` | Goto matching bracket | normal: `` mm ``, select: `` mm `` |
+| `match_brackets` | Goto matching bracket | normal: `` mm `` |
+| `extend_brackets` | Extend to matching bracket | select: `` mm `` |
 | `surround_add` | Surround add | normal: `` ms ``, select: `` ms `` |
 | `surround_replace` | Surround replace | normal: `` mr ``, select: `` mr `` |
 | `surround_delete` | Surround delete | normal: `` md ``, select: `` md `` |
-| `select_textobject_around` | Select around object | normal: `` ma ``, select: `` ma `` |
-| `select_textobject_inner` | Select inside object | normal: `` mi ``, select: `` mi `` |
+| `select_textobject_around` | Select around object | normal: `` ma `` |
+| `select_textobject_inner` | Select inside object | normal: `` mi `` |
+| `extend_textobject_around` | Extend around object | select: `` ma `` |
+| `extend_textobject_inner` | Extend inside object | select: `` mi `` |
 | `goto_next_function` | Goto next function | normal: `` ]f ``, select: `` ]f `` |
 | `goto_prev_function` | Goto previous function | normal: `` [f ``, select: `` [f `` |
 | `goto_next_class` | Goto next type definition | normal: `` ]t ``, select: `` ]t `` |

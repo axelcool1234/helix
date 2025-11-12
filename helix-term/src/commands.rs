@@ -561,11 +561,14 @@ impl MappableCommand {
         scroll_up, "Scroll view up",
         scroll_down, "Scroll view down",
         match_brackets, "Goto matching bracket",
+        extend_brackets, "Extend to matching bracket",
         surround_add, "Surround add",
         surround_replace, "Surround replace",
         surround_delete, "Surround delete",
         select_textobject_around, "Select around object",
         select_textobject_inner, "Select inside object",
+        extend_textobject_around, "Extend around object",
+        extend_textobject_inner, "Extend inside object",
         goto_next_function, "Goto next function",
         goto_prev_function, "Goto previous function",
         goto_next_class, "Goto next type definition",
@@ -5638,9 +5641,9 @@ fn select_all_children(cx: &mut Context) {
     cx.editor.apply_motion(motion);
 }
 
-fn match_brackets(cx: &mut Context) {
+fn match_brackets_impl(cx: &mut Context, movement: Movement) {
     let (view, doc) = current!(cx.editor);
-    let is_select = cx.editor.mode == Mode::Select;
+    let is_select = movement == Movement::Extend;
     let text = doc.text();
     let text_slice = text.slice(..);
 
@@ -5659,7 +5662,13 @@ fn match_brackets(cx: &mut Context) {
     doc.set_selection(view.id, selection);
 }
 
-//
+fn match_brackets(cx: &mut Context) {
+    match_brackets_impl(cx, Movement::Move);
+}
+
+fn extend_brackets(cx: &mut Context) {
+    match_brackets_impl(cx, Movement::Extend);
+}
 
 fn jump_forward(cx: &mut Context) {
     cx.editor.jump_forward(cx.editor.tree.focus, cx.count());
@@ -5996,15 +6005,24 @@ fn goto_prev_entry(cx: &mut Context) {
 }
 
 fn select_textobject_around(cx: &mut Context) {
-    select_textobject(cx, textobject::TextObject::Around);
+    select_textobject_impl(cx, textobject::TextObject::Around, Movement::Move);
 }
 
 fn select_textobject_inner(cx: &mut Context) {
-    select_textobject(cx, textobject::TextObject::Inside);
+    select_textobject_impl(cx, textobject::TextObject::Inside, Movement::Move);
 }
 
-fn select_textobject(cx: &mut Context, objtype: textobject::TextObject) {
+fn extend_textobject_around(cx: &mut Context) {
+    select_textobject_impl(cx, textobject::TextObject::Around, Movement::Extend);
+}
+
+fn extend_textobject_inner(cx: &mut Context) {
+    select_textobject_impl(cx, textobject::TextObject::Inside, Movement::Extend);
+}
+
+fn select_textobject_impl(cx: &mut Context, objtype: textobject::TextObject, movement: Movement) {
     let count = cx.count();
+    let is_select = movement == Movement::Extend;
 
     cx.on_next_key(move |cx, event| {
         cx.editor.autoinfo = None;
@@ -6045,7 +6063,7 @@ fn select_textobject(cx: &mut Context, objtype: textobject::TextObject) {
                 };
 
                 let selection = doc.selection(view.id).clone().transform(|range| {
-                    match ch {
+                    let found_range = match ch {
                         'w' => textobject::textobject_word(text, range, objtype, count, false),
                         'W' => textobject::textobject_word(text, range, objtype, count, true),
                         't' => textobject_treesitter("class", range),
@@ -6074,6 +6092,11 @@ fn select_textobject(cx: &mut Context, objtype: textobject::TextObject) {
                             count,
                         ),
                         _ => range,
+                    };
+                    if is_select {
+                        range.extend(found_range.from(), found_range.to())
+                    } else {
+                        found_range
                     }
                 });
                 doc.set_selection(view.id, selection);
