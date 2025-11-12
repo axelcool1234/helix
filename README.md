@@ -30,6 +30,11 @@ All shortcuts/keymaps can be found [in the documentation on the website](https:/
 
 [Troubleshooting](https://github.com/helix-editor/helix/wiki/Troubleshooting)
 
+# MODDED
+- New motion: [Flash.nvim](https://github.com/folke/flash.nvim) style jump motion (`goto_word_flash` and `extend_to_word_flash`).
+- Surround motions can now extend in select mode.
+- Surround motions are fixed for `mdm`.
+
 # Features
 
 - Vim-like modal editing
