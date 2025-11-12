@@ -616,6 +616,10 @@ impl MappableCommand {
         goto_prev_tabstop, "Goto next snippet placeholder",
         rotate_selections_first, "Make the first selection your primary one",
         rotate_selections_last, "Make the last selection your primary one",
+
+        // === The following MODDED commands are added by Axel ===
+        goto_word_flash, "Jump with flash jump",
+        extend_to_word_flash, "Extend with flash jump",
     );
 }
 
@@ -6963,4 +6967,254 @@ fn lsp_or_syntax_workspace_symbol_picker(cx: &mut Context) {
     } else {
         syntax_workspace_symbol_picker(cx);
     }
+}
+
+// === The following is MODDED code added by Axel ===
+fn goto_word_flash(cx: &mut Context) {
+    jump_to_word_flash(cx, Movement::Move)
+}
+
+fn extend_to_word_flash(cx: &mut Context) {
+    jump_to_word_flash(cx, Movement::Extend)
+}
+
+fn jump_to_word_flash(cx: &mut Context, behaviour: Movement) {
+    jump_to_word_flash_impl(cx, behaviour, String::new());
+}
+
+fn jump_to_word_flash_impl(cx: &mut Context, behaviour: Movement, mut search: String) {
+    // Calculate jump candidates based on current search string
+    let words = calculate_flash_candidates(cx, &search);
+
+    // Show labels for current matches
+    if !words.is_empty() {
+        display_jump_labels(cx, &words);
+    }
+
+    cx.on_next_key(move |cx, event| {
+        let (view, doc) = current!(cx.editor);
+        let doc_id = doc.id();
+        let view_id = view.id;
+
+        match event.code {
+            KeyCode::Esc => {
+                doc_mut!(cx.editor, &doc_id).remove_jump_labels(view_id);
+                return; // Exit if escape is entered
+            }
+            KeyCode::Backspace => {
+                doc_mut!(cx.editor, &doc_id).remove_jump_labels(view_id);
+                if search.is_empty() {
+                    return; // Exit if already empty
+                }
+                search.pop();
+                jump_to_word_flash_impl(cx, behaviour, search);
+                return;
+            }
+            KeyCode::Char(ch) if event.modifiers.is_empty() => {
+                // Check if this matches a label (and jump to it if it does)
+                let alphabet = flash_alphabet();
+                if let Some(idx) = alphabet.iter().position(|&it| it == ch) {
+                    if let Some(range) = words.get(idx) {
+                        doc_mut!(cx.editor, &doc_id).remove_jump_labels(view_id);
+                        jump_to_range(cx, *range, behaviour);
+                        return;
+                    }
+                }
+
+                // Otherwise, add to search string
+                doc_mut!(cx.editor, &doc_id).remove_jump_labels(view_id);
+                search.push(ch);
+                jump_to_word_flash_impl(cx, behaviour, search);
+            }
+            _ => {
+                doc_mut!(cx.editor, &doc_id).remove_jump_labels(view_id);
+            }
+        }
+    });
+}
+
+fn calculate_flash_candidates(cx: &Context, search: &str) -> Vec<Range> {
+    use helix_core::chars::char_is_punctuation;
+    let acceptable_char = |ch| char_is_word(ch) || char_is_punctuation(ch);
+    let alphabet = flash_alphabet();
+    if alphabet.is_empty() || search.is_empty() {
+        return Vec::new();
+    }
+
+    let jump_label_limit = alphabet.len();
+    let mut words = Vec::with_capacity(jump_label_limit);
+    let (view, doc) = current_ref!(cx.editor);
+    let text = doc.text().slice(..);
+
+    // This is not necessarily exact if there is virtual text like soft wrap.
+    // It's ok though because the extra jump labels will not be rendered.
+    let start = text.line_to_char(text.char_to_line(doc.view_offset(view.id).anchor));
+    let end = text.line_to_char(view.estimate_last_doc_line(doc) + 1);
+
+    let primary_selection = doc.selection(view.id).primary();
+    let cursor = primary_selection.cursor(text);
+    let mut cursor_fwd = Range::point(cursor);
+    let mut cursor_rev = Range::point(cursor);
+
+    // Handle case where cursor is on a word
+    if text.get_char(cursor).is_some_and(|c| !c.is_whitespace()) {
+        let cursor_word_end = movement::move_next_word_end(text, cursor_fwd, 1);
+        //  single grapheme words need a special case
+        if cursor_word_end.anchor == cursor {
+            cursor_fwd = cursor_word_end;
+        }
+        let cursor_word_start = movement::move_prev_word_start(text, cursor_rev, 1);
+        if cursor_word_start.anchor == next_grapheme_boundary(text, cursor) {
+            cursor_rev = cursor_word_start;
+        }
+    }
+
+    // Bidirectional search from cursor
+    'outer: loop {
+        let mut changed = false;
+
+        // Search forward
+        while cursor_fwd.head < end {
+            cursor_fwd = movement::move_next_word_end(text, cursor_fwd, 1);
+            let add_label = add_label(text, cursor_fwd, acceptable_char, true);
+            if !add_label {
+                continue;
+            }
+
+            // skip any leading whitespace
+            cursor_fwd.anchor += text
+                .chars_at(cursor_fwd.anchor)
+                .take_while(|&c| !acceptable_char(c))
+                .count();
+
+            // Check if word matches search string
+            if matches_search(text, cursor_fwd.anchor, search) {
+                changed = true;
+                words.push(cursor_fwd);
+                if words.len() == jump_label_limit {
+                    break 'outer;
+                }
+            }
+            // break;
+        }
+
+        // Search backward
+        while cursor_rev.head > start {
+            cursor_rev = movement::move_prev_word_start(text, cursor_rev, 1);
+            let add_label = add_label(text, cursor_rev, acceptable_char, false);
+            if !add_label {
+                continue;
+            }
+
+            cursor_rev.anchor -= text
+                .chars_at(cursor_rev.anchor)
+                .reversed()
+                .take_while(|&c| !acceptable_char(c))
+                .count();
+
+            // Check if word matches search string (checking at head for reverse)
+            if matches_search(text, cursor_rev.head, search) {
+                changed = true;
+                words.push(cursor_rev);
+                if words.len() == jump_label_limit {
+                    break 'outer;
+                }
+            }
+            // break;
+        }
+
+        if !changed {
+            break;
+        }
+    }
+
+    words
+}
+
+#[inline]
+fn flash_alphabet() -> Vec<char> {
+    return ('a'..='z').chain('A'..='Z').collect();
+}
+
+fn matches_search(text: RopeSlice<'_>, pos: usize, search: &str) -> bool {
+    let search_len = search.chars().count();
+    if pos + search_len > text.len_chars() {
+        return false;
+    }
+
+    let slice = text.slice(pos..(pos + search_len));
+    slice
+        .as_str()
+        .map(|s| s.starts_with(search))
+        .unwrap_or(false)
+}
+
+fn add_label<F>(text: RopeSlice<'_>, cursor: Range, acceptable_char: F, rev: bool) -> bool
+where
+    F: Fn(char) -> bool,
+{
+    // The cursor is on a word that is at least one grapheme long and
+    // made up of acceptable characters.
+    let size = 1;
+    if rev {
+        text.slice(..cursor.head).graphemes_rev()
+    } else {
+        text.slice(cursor.head..).graphemes()
+    }
+    .take(size)
+    .take_while(|g| g.chars().all(|c| acceptable_char(c)))
+    .count()
+        == size
+}
+
+fn display_jump_labels(cx: &mut Context, words: &[Range]) {
+    let alphabet = flash_alphabet();
+    let alphabet_char = |i| {
+        let mut res = Tendril::new();
+        res.push(alphabet[i]);
+        res
+    };
+
+    // Add label for each jump candidate to the View as virtual text.
+    let mut overlays: Vec<_> = words
+        .iter()
+        .enumerate()
+        .take(alphabet.len())
+        .map(|(i, range)| Overlay::new(range.from(), alphabet_char(i)))
+        .collect();
+
+    overlays.sort_unstable_by_key(|overlay| overlay.char_idx);
+
+    let (view, doc) = current!(cx.editor);
+    doc.set_jump_labels(view.id, overlays);
+}
+
+fn jump_to_range(cx: &mut Context, range: Range, behaviour: Movement) {
+    let (view, doc) = current!(cx.editor);
+    let view_id = view.id;
+    let doc_id = doc.id();
+    let primary_selection = doc.selection(view_id).primary();
+
+    let final_range = if behaviour == Movement::Extend {
+        let anchor = if range.anchor < range.head {
+            let from = primary_selection.from();
+            if range.anchor < from {
+                range.anchor
+            } else {
+                from
+            }
+        } else {
+            let to = primary_selection.to();
+            if range.anchor > to {
+                range.anchor
+            } else {
+                to
+            }
+        };
+        Range::new(anchor, range.head)
+    } else {
+        range.with_direction(Direction::Forward)
+    };
+
+    doc_mut!(cx.editor, &doc_id).set_selection(view_id, final_range.into());
 }
