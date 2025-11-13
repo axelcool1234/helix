@@ -37,6 +37,7 @@ All shortcuts/keymaps can be found [in the documentation on the website](https:/
 - In insert mode, matching brackets are highlighted when inserting the closing bracket.
 - Unfocused views are now dimmed. Current view is also dimmed when jumping to labels.
 - New surround motion for indentation levels.
+- New feature for fuzzy/grep search on current buffer.
 
 # Features
 
