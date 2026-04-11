@@ -26,7 +26,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use std::{
     borrow::Cow,
     cell::Cell,
-    collections::{BTreeMap, HashMap, HashSet, VecDeque},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
     fs,
     io::{self, stdin},
     num::{NonZeroU8, NonZeroUsize},
@@ -55,6 +55,7 @@ use helix_core::{
 };
 use helix_dap::{self as dap, registry::DebugAdapterId};
 use helix_lsp::lsp;
+use helix_lsp::LeanGoalsAccomplishedRange;
 use helix_stdx::path::canonicalize;
 
 use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
@@ -1273,6 +1274,7 @@ pub struct Breakpoint {
 use futures_util::stream::{Flatten, Once};
 
 type Diagnostics = BTreeMap<Uri, Vec<(lsp::Diagnostic, DiagnosticProvider)>>;
+type LeanGoalsAccomplished = BTreeMap<Uri, BTreeSet<LeanGoalsAccomplishedRange>>;
 
 pub struct Editor {
     /// Current editing mode.
@@ -1294,6 +1296,7 @@ pub struct Editor {
     pub macro_replaying: Vec<char>,
     pub language_servers: helix_lsp::Registry,
     pub diagnostics: Diagnostics,
+    pub lean_goals_accomplished: LeanGoalsAccomplished,
     pub diff_providers: DiffProviderRegistry,
 
     pub debug_adapters: dap::registry::Registry,
@@ -1450,6 +1453,7 @@ impl Editor {
             theme: theme_loader.default(),
             language_servers,
             diagnostics: Diagnostics::new(),
+            lean_goals_accomplished: LeanGoalsAccomplished::new(),
             diff_providers: DiffProviderRegistry::default(),
             debug_adapters: dap::registry::Registry::new(),
             breakpoints: HashMap::new(),
@@ -2399,6 +2403,34 @@ impl Editor {
     pub fn document_by_path_mut<P: AsRef<Path>>(&mut self, path: P) -> Option<&mut Document> {
         self.documents_mut()
             .find(|doc| doc.path().is_some_and(|p| p == path.as_ref()))
+    }
+
+    pub fn set_lean_goals_accomplished(
+        &mut self,
+        uri: Uri,
+        ranges: BTreeSet<LeanGoalsAccomplishedRange>,
+    ) {
+        if ranges.is_empty() {
+            self.lean_goals_accomplished.remove(&uri);
+        } else {
+            self.lean_goals_accomplished.insert(uri, ranges);
+        }
+    }
+
+    pub fn has_lean_goals_accomplished(&self, doc: &Document, line: usize) -> bool {
+        doc.uri()
+            .and_then(|uri| self.lean_goals_accomplished.get(&uri))
+            .is_some_and(|ranges| ranges.iter().any(|range| range.start_line == line))
+    }
+
+    pub fn line_within_lean_goals_accomplished(&self, doc: &Document, line: usize) -> bool {
+        doc.uri()
+            .and_then(|uri| self.lean_goals_accomplished.get(&uri))
+            .is_some_and(|ranges| {
+                ranges
+                    .iter()
+                    .any(|range| range.start_line <= line && line <= range.end_line)
+            })
     }
 
     /// Returns all supported diagnostics for the document

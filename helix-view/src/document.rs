@@ -166,6 +166,7 @@ pub struct Document {
     /// consumers like the statusline trust indicator, LSP launch, and DAP launch. Taken in
     /// `set_path` so save-as recomputes.
     workspace_root: OnceLock<PathBuf>,
+    scratch_title: Option<String>,
     encoding: &'static encoding::Encoding,
     has_bom: bool,
 
@@ -736,6 +737,7 @@ impl Document {
             path: None,
             relative_path: OnceLock::new(),
             workspace_root: OnceLock::new(),
+            scratch_title: None,
             encoding,
             has_bom,
             text,
@@ -2131,8 +2133,19 @@ impl Document {
     }
 
     pub fn display_name(&self) -> Cow<'_, str> {
-        self.relative_path()
-            .map_or_else(|| SCRATCH_BUFFER_NAME.into(), |path| path.to_string_lossy())
+        self.relative_path().map_or_else(
+            || {
+                self.scratch_title
+                    .as_deref()
+                    .map(Cow::from)
+                    .unwrap_or_else(|| SCRATCH_BUFFER_NAME.into())
+            },
+            |path| path.to_string_lossy(),
+        )
+    }
+
+    pub fn set_scratch_title(&mut self, title: Option<String>) {
+        self.scratch_title = title;
     }
 
     // transact(Fn) ?

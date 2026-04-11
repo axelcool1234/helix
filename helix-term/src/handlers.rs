@@ -22,6 +22,7 @@ pub mod diagnostics;
 mod document_colors;
 mod document_highlight;
 mod document_links;
+mod lean_infoview;
 mod prompt;
 mod signature_help;
 mod snippet;
@@ -62,6 +63,7 @@ pub fn setup(config: Arc<ArcSwap<Config>>) -> Handlers {
     snippet::register_hooks(&handlers);
     document_colors::register_hooks(&handlers);
     document_links::register_hooks(&handlers);
+    lean_infoview::register_hooks(&handlers);
     prompt::register_hooks(&handlers);
     workspace_trust::register_hooks(&handlers);
     handlers
