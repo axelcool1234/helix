@@ -64,6 +64,7 @@ pub enum Direction {
 pub struct Container {
     layout: Layout,
     children: Vec<ViewId>,
+    weights: Vec<u16>,
     area: Rect,
 }
 
@@ -72,6 +73,7 @@ impl Container {
         Self {
             layout,
             children: Vec::new(),
+            weights: Vec::new(),
             area: Rect::default(),
         }
     }
@@ -132,6 +134,7 @@ impl Tree {
         };
 
         container.children.insert(pos, node);
+        container.weights.insert(pos, 1);
         // focus the new node
         self.focus = node;
 
@@ -169,6 +172,7 @@ impl Tree {
                 pos + 1
             };
             container.children.insert(pos, node);
+            container.weights.insert(pos, 1);
             self.nodes[node].parent = parent;
         } else {
             let mut split = Node::container(layout);
@@ -184,6 +188,8 @@ impl Tree {
             };
             container.children.push(focus);
             container.children.push(node);
+            container.weights.push(1);
+            container.weights.push(1);
             self.nodes[focus].parent = split;
             self.nodes[node].parent = split;
 
@@ -203,6 +209,9 @@ impl Tree {
 
             // replace focus on parent with split
             container.children[pos] = split;
+            if container.weights.len() < container.children.len() {
+                container.weights.resize(container.children.len(), 1);
+            }
         }
 
         // focus the new node
@@ -244,7 +253,35 @@ impl Tree {
             self.nodes[new].parent = parent;
         } else {
             container.children.remove(pos);
+            container.weights.remove(pos);
         }
+    }
+
+    pub fn set_two_way_split_fraction(&mut self, view: ViewId, own_weight: u16, other_weight: u16) {
+        let Some(node) = self.nodes.get(view) else {
+            return;
+        };
+        let parent = node.parent;
+        let Some(Node {
+            content: Content::Container(container),
+            ..
+        }) = self.nodes.get_mut(parent)
+        else {
+            return;
+        };
+
+        if container.children.len() != 2 {
+            return;
+        }
+
+        for (idx, child) in container.children.iter().enumerate() {
+            container.weights[idx] = if *child == view {
+                own_weight
+            } else {
+                other_weight
+            };
+        }
+        self.recalculate();
     }
 
     pub fn remove(&mut self, index: ViewId) {
@@ -382,12 +419,17 @@ impl Tree {
                     match container.layout {
                         Layout::Horizontal => {
                             let len = container.children.len();
-
-                            let height = area.height / len as u16;
+                            let total_weight: u16 = container.weights.iter().copied().sum();
 
                             let mut child_y = area.y;
 
                             for (i, child) in container.children.iter().enumerate() {
+                                let weight = container.weights.get(i).copied().unwrap_or(1);
+                                let height = if total_weight == 0 {
+                                    area.height / len as u16
+                                } else {
+                                    area.height.saturating_mul(weight) / total_weight
+                                };
                                 let mut area = Rect::new(
                                     container.area.x,
                                     child_y,
@@ -408,16 +450,22 @@ impl Tree {
                         Layout::Vertical => {
                             let len = container.children.len();
                             let len_u16 = len as u16;
+                            let total_weight: u16 = container.weights.iter().copied().sum();
 
                             let inner_gap = 1u16;
                             let total_gap = inner_gap * len_u16.saturating_sub(2);
 
                             let used_area = area.width.saturating_sub(total_gap);
-                            let width = used_area / len_u16;
 
                             let mut child_x = area.x;
 
                             for (i, child) in container.children.iter().enumerate() {
+                                let weight = container.weights.get(i).copied().unwrap_or(1);
+                                let width = if total_weight == 0 {
+                                    used_area / len_u16
+                                } else {
+                                    used_area.saturating_mul(weight) / total_weight
+                                };
                                 let mut area = Rect::new(
                                     child_x,
                                     container.area.y,
@@ -964,5 +1012,32 @@ mod test {
                 .map(|(view, _)| view.area.width)
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn two_way_split_fraction_biases_widths() {
+        let mut tree = Tree::new(Rect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 24,
+        });
+        let mut view = View::new(DocumentId::default(), GutterConfig::default());
+        view.area = Rect::new(0, 0, 80, 24);
+        tree.insert(view);
+
+        let source = tree.focus;
+        let view = View::new(DocumentId::default(), GutterConfig::default());
+        tree.split(view, Layout::Vertical);
+        let infoview = tree.focus;
+
+        tree.set_two_way_split_fraction(infoview, 2, 5);
+
+        let source_width = tree.get(source).area.width;
+        let infoview_width = tree.get(infoview).area.width;
+
+        assert!(source_width > infoview_width);
+        assert_eq!(source_width + infoview_width + 1, 80);
+        assert!(infoview_width >= 22 && infoview_width <= 23);
     }
 }

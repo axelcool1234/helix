@@ -1,4 +1,6 @@
 pub(crate) mod dap;
+pub(crate) mod lean_abbreviations;
+pub(crate) mod lean_infoview;
 pub(crate) mod lsp;
 pub(crate) mod syntax;
 pub(crate) mod typed;
@@ -11,6 +13,8 @@ use helix_stdx::{
     rope::{self, RopeSliceExt},
 };
 use helix_vcs::{FileChange, Hunk};
+pub use lean_infoview::*;
+pub use lean_abbreviations::*;
 pub use lsp::*;
 pub use syntax::*;
 use tui::{
@@ -430,6 +434,9 @@ impl MappableCommand {
         normal_mode, "Enter normal mode",
         select_mode, "Enter selection extend mode",
         exit_select_mode, "Exit selection mode",
+        lean_infoview_toggle, "Toggle Lean infoview",
+        lean_infoview_focus, "Focus Lean infoview",
+        lean_infoview_refresh, "Refresh Lean infoview",
         goto_definition, "Goto definition",
         goto_declaration, "Goto declaration",
         add_newline_above, "Add newline above",
@@ -3831,6 +3838,7 @@ fn open_above(cx: &mut Context) {
 }
 
 fn normal_mode(cx: &mut Context) {
+    lean_abbreviations::expand_before_commit(cx.editor);
     cx.editor.enter_normal_mode();
 }
 
@@ -4206,6 +4214,10 @@ pub mod insert {
     use helix_view::editor::SmartTabConfig;
 
     pub fn insert_char(cx: &mut Context, c: char) {
+        if c == ' ' && super::lean_abbreviations::handle_space(cx) {
+            return;
+        }
+
         let (view, doc) = current_ref!(cx.editor);
         let text = doc.text();
         let selection = doc.selection(view.id);
@@ -4317,6 +4329,7 @@ pub mod insert {
     }
 
     pub fn insert_newline(cx: &mut Context) {
+        super::lean_abbreviations::expand_before_commit(cx.editor);
         let config = cx.editor.config();
         let (view, doc) = current_ref!(cx.editor);
         let loader = cx.editor.syn_loader.load();

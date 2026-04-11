@@ -3,6 +3,7 @@ use helix_term::application::Application;
 use super::*;
 
 mod insert;
+mod lean_abbreviations;
 mod movement;
 mod reverse_selection_contents;
 mod rotate_selection_contents;

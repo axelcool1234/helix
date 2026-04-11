@@ -39,6 +39,14 @@ use tokio::{
     },
 };
 
+struct InitializeValueRequest;
+
+impl lsp::request::Request for InitializeValueRequest {
+    type Params = Value;
+    type Result = lsp::InitializeResult;
+    const METHOD: &'static str = lsp::request::Initialize::METHOD;
+}
+
 fn workspace_for_uri(uri: lsp::Url) -> WorkspaceFolder {
     lsp::WorkspaceFolder {
         name: uri
@@ -423,7 +431,7 @@ impl Client {
     }
 
     /// Execute a RPC request on the language server.
-    fn call<R: lsp::request::Request>(
+    pub fn call<R: lsp::request::Request>(
         &self,
         params: R::Params,
     ) -> impl Future<Output = Result<R::Result>>
@@ -736,7 +744,21 @@ impl Client {
             work_done_progress_params: lsp::WorkDoneProgressParams::default(),
         };
 
-        self.call::<lsp::request::Initialize>(params).await
+        let mut params = serde_json::to_value(params)?;
+        if self.name == "lean" {
+            params
+                .get_mut("capabilities")
+                .and_then(Value::as_object_mut)
+                .expect("initialize params capabilities should serialize as an object")
+                .insert(
+                    "lean".to_string(),
+                    serde_json::json!({
+                        "silentDiagnosticSupport": true,
+                    }),
+                );
+        }
+
+        self.call::<InitializeValueRequest>(params).await
     }
 
     pub async fn shutdown(&self) -> Result<()> {

@@ -805,7 +805,7 @@ impl Application {
                         });
                     }
                     Notification::PublishDiagnostics(params) => {
-                        let uri = match helix_core::Uri::try_from(params.uri) {
+                        let uri = match helix_core::Uri::try_from(params.uri().clone()) {
                             Ok(uri) => uri,
                             Err(err) => {
                                 log::error!("{err}");
@@ -821,11 +821,13 @@ impl Application {
                             server_id,
                             identifier: None,
                         };
+                        self.editor
+                            .set_lean_goals_accomplished(uri.clone(), params.goals_accomplished_ranges());
                         self.editor.handle_lsp_diagnostics(
                             &provider,
                             uri,
-                            params.version,
-                            params.diagnostics,
+                            params.version(),
+                            params.into_visible_diagnostics(),
                         );
                     }
                     Notification::ShowMessage(params) => {

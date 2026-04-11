@@ -11,7 +11,7 @@ use helix_lsp::{
 use tokio_stream::StreamExt;
 use tui::{text::Span, widgets::Row};
 
-use super::{align_view, push_jump, Align, Context, Editor};
+use super::{align_view, lean_infoview, push_jump, Align, Context, Editor};
 
 use helix_core::{
     diagnostic::DiagnosticProvider, syntax::config::LanguageServerFeature,
@@ -886,6 +886,24 @@ fn goto_impl(editor: &mut Editor, compositor: &mut Compositor, locations: Vec<Lo
     }
 }
 
+pub(crate) fn show_locations(
+    editor: &mut Editor,
+    compositor: &mut Compositor,
+    locations: Vec<lsp::Location>,
+    offset_encoding: OffsetEncoding,
+) {
+    let locations: Vec<Location> = locations
+        .into_iter()
+        .filter_map(|location| lsp_location_to_location(location, offset_encoding))
+        .collect();
+
+    if locations.is_empty() {
+        editor.set_error("No location found.");
+    } else {
+        goto_impl(editor, compositor, locations);
+    }
+}
+
 fn goto_single_impl<P, F>(cx: &mut Context, feature: LanguageServerFeature, request_provider: P)
 where
     P: Fn(&Client, lsp::Position, lsp::TextDocumentIdentifier) -> Option<F>,
@@ -953,6 +971,10 @@ where
 }
 
 pub fn goto_declaration(cx: &mut Context) {
+    if lean_infoview::goto_from_infoview(cx, "declaration") {
+        return;
+    }
+
     goto_single_impl(
         cx,
         LanguageServerFeature::GotoDeclaration,
@@ -961,6 +983,10 @@ pub fn goto_declaration(cx: &mut Context) {
 }
 
 pub fn goto_definition(cx: &mut Context) {
+    if lean_infoview::goto_from_infoview(cx, "definition") {
+        return;
+    }
+
     goto_single_impl(
         cx,
         LanguageServerFeature::GotoDefinition,
@@ -969,6 +995,10 @@ pub fn goto_definition(cx: &mut Context) {
 }
 
 pub fn goto_type_definition(cx: &mut Context) {
+    if lean_infoview::goto_from_infoview(cx, "type") {
+        return;
+    }
+
     goto_single_impl(
         cx,
         LanguageServerFeature::GotoTypeDefinition,

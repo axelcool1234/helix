@@ -20,12 +20,14 @@ use slotmap::SlotMap;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use std::{
+    collections::BTreeSet,
     collections::HashMap,
     fs,
     path::{Path, PathBuf},
     sync::Arc,
 };
 
+use serde::Deserialize;
 use thiserror::Error;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -528,10 +530,106 @@ pub enum Notification {
     Initialized,
     // and this notification to signal that the LSP exited
     Exit,
-    PublishDiagnostics(lsp::PublishDiagnosticsParams),
+    PublishDiagnostics(PublishDiagnostics),
     ShowMessage(lsp::ShowMessageParams),
     LogMessage(lsp::LogMessageParams),
     ProgressMessage(lsp::ProgressParams),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct PublishDiagnostics {
+    uri: lsp::Url,
+    version: Option<i32>,
+    diagnostics: Vec<DiagnosticWithExtras>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct LeanGoalsAccomplishedRange {
+    pub start_line: usize,
+    pub end_line: usize,
+}
+
+#[derive(Debug, PartialEq, Clone, Deserialize)]
+struct DiagnosticWithExtras {
+    #[serde(flatten)]
+    diagnostic: lsp::Diagnostic,
+    #[serde(default, rename = "fullRange")]
+    full_range: Option<lsp::Range>,
+    #[serde(default, rename = "isSilent")]
+    is_silent: bool,
+    #[serde(default, rename = "leanTags")]
+    lean_tags: Vec<u64>,
+}
+
+#[derive(Debug, PartialEq, Clone, Deserialize)]
+struct PublishDiagnosticsParamsWithExtras {
+    uri: lsp::Url,
+    version: Option<i32>,
+    diagnostics: Vec<DiagnosticWithExtras>,
+}
+
+impl PublishDiagnostics {
+    const LEAN_GOALS_ACCOMPLISHED_TAG: u64 = 2;
+
+    pub fn uri(&self) -> &lsp::Url {
+        &self.uri
+    }
+
+    pub fn version(&self) -> Option<i32> {
+        self.version
+    }
+
+    pub fn goals_accomplished_lines(&self) -> BTreeSet<usize> {
+        self.diagnostics
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic
+                    .lean_tags
+                    .contains(&Self::LEAN_GOALS_ACCOMPLISHED_TAG)
+            })
+            .map(|diagnostic| diagnostic.diagnostic.range.start.line as usize)
+            .collect()
+    }
+
+    pub fn goals_accomplished_ranges(&self) -> BTreeSet<LeanGoalsAccomplishedRange> {
+        self.diagnostics
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic
+                    .lean_tags
+                    .contains(&Self::LEAN_GOALS_ACCOMPLISHED_TAG)
+            })
+            .map(|diagnostic| {
+                let range = diagnostic.full_range.unwrap_or(diagnostic.diagnostic.range);
+                let mut end_line = range.end.line as usize;
+                if range.end.character == 0 && end_line > range.start.line as usize {
+                    end_line -= 1;
+                }
+                LeanGoalsAccomplishedRange {
+                    start_line: range.start.line as usize,
+                    end_line,
+                }
+            })
+            .collect()
+    }
+
+    pub fn into_visible_diagnostics(self) -> Vec<lsp::Diagnostic> {
+        self.diagnostics
+            .into_iter()
+            .filter(|diagnostic| !diagnostic.is_silent)
+            .map(|diagnostic| diagnostic.diagnostic)
+            .collect()
+    }
+}
+
+impl From<PublishDiagnosticsParamsWithExtras> for PublishDiagnostics {
+    fn from(params: PublishDiagnosticsParamsWithExtras) -> Self {
+        Self {
+            uri: params.uri,
+            version: params.version,
+            diagnostics: params.diagnostics,
+        }
+    }
 }
 
 impl Notification {
@@ -542,8 +640,8 @@ impl Notification {
             lsp::notification::Initialized::METHOD => Self::Initialized,
             lsp::notification::Exit::METHOD => Self::Exit,
             lsp::notification::PublishDiagnostics::METHOD => {
-                let params: lsp::PublishDiagnosticsParams = params.parse()?;
-                Self::PublishDiagnostics(params)
+                let params: PublishDiagnosticsParamsWithExtras = params.parse()?;
+                Self::PublishDiagnostics(params.into())
             }
 
             lsp::notification::ShowMessage::METHOD => {
@@ -1027,8 +1125,13 @@ pub fn find_lsp_workspace(
 
 #[cfg(test)]
 mod tests {
-    use super::{lsp, util::*, OffsetEncoding};
+    use super::{
+        jsonrpc, lsp, util::*, LeanGoalsAccomplishedRange, Notification, OffsetEncoding,
+    };
     use helix_core::Rope;
+    use serde_json::json;
+
+    use lsp::notification::Notification as _;
 
     #[test]
     fn converts_lsp_pos_to_pos() {
@@ -1093,5 +1196,97 @@ mod tests {
         let transaction = generate_transaction_from_edits(&source, edits, OffsetEncoding::Utf16);
         assert!(transaction.apply(&mut source));
         assert_eq!(source, "[\n  \"🇺🇸\",\n  \"🎄\",\n]");
+    }
+
+    #[test]
+    fn publish_diagnostics_preserves_lean_silent_metadata() {
+        let value = json!({
+            "uri": "file:///tmp/Test.lean",
+            "version": 7,
+            "diagnostics": [
+                {
+                    "range": {
+                        "start": { "line": 3, "character": 0 },
+                        "end": { "line": 3, "character": 5 }
+                    },
+                    "severity": 3,
+                    "message": "declaration uses 'sorry'",
+                    "source": "Lean 4"
+                },
+                {
+                    "range": {
+                        "start": { "line": 8, "character": 0 },
+                        "end": { "line": 12, "character": 3 }
+                    },
+                    "severity": 3,
+                    "message": "goals accomplished",
+                    "source": "Lean 4",
+                    "isSilent": true,
+                    "leanTags": [2]
+                }
+            ]
+        });
+        let params = jsonrpc::Params::Map(value.as_object().unwrap().clone());
+
+        let notification = Notification::parse(lsp::notification::PublishDiagnostics::METHOD, params)
+            .expect("publishDiagnostics should parse");
+
+        let Notification::PublishDiagnostics(params) = notification else {
+            panic!("expected publish diagnostics notification");
+        };
+
+        assert_eq!(params.version(), Some(7));
+        assert_eq!(params.goals_accomplished_lines().into_iter().collect::<Vec<_>>(), vec![8]);
+        assert_eq!(
+            params.goals_accomplished_ranges().into_iter().collect::<Vec<_>>(),
+            vec![LeanGoalsAccomplishedRange {
+                start_line: 8,
+                end_line: 12,
+            }]
+        );
+
+        let visible = params.into_visible_diagnostics();
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].message, "declaration uses 'sorry'");
+    }
+
+    #[test]
+    fn publish_diagnostics_prefers_full_range_for_accomplished_theorem() {
+        let value = json!({
+            "uri": "file:///tmp/Test.lean",
+            "diagnostics": [
+                {
+                    "range": {
+                        "start": { "line": 8, "character": 0 },
+                        "end": { "line": 8, "character": 5 }
+                    },
+                    "fullRange": {
+                        "start": { "line": 8, "character": 0 },
+                        "end": { "line": 14, "character": 0 }
+                    },
+                    "severity": 3,
+                    "message": "goals accomplished",
+                    "source": "Lean 4",
+                    "isSilent": true,
+                    "leanTags": [2]
+                }
+            ]
+        });
+        let params = jsonrpc::Params::Map(value.as_object().unwrap().clone());
+
+        let notification = Notification::parse(lsp::notification::PublishDiagnostics::METHOD, params)
+            .expect("publishDiagnostics should parse");
+
+        let Notification::PublishDiagnostics(params) = notification else {
+            panic!("expected publish diagnostics notification");
+        };
+
+        assert_eq!(
+            params.goals_accomplished_ranges().into_iter().collect::<Vec<_>>(),
+            vec![LeanGoalsAccomplishedRange {
+                start_line: 8,
+                end_line: 13,
+            }]
+        );
     }
 }

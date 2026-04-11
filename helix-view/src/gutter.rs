@@ -46,7 +46,7 @@ impl GutterType {
 }
 
 pub fn diagnostic<'doc>(
-    _editor: &'doc Editor,
+    editor: &'doc Editor,
     doc: &'doc Document,
     _view: &View,
     theme: &Theme,
@@ -74,15 +74,22 @@ pub fn diagnostic<'doc>(
                                 .any(|ls| ls.id() == id)
                         })
                 });
-            diagnostics_on_line.max_by_key(|d| d.severity).map(|d| {
+            if let Some(diagnostic) = diagnostics_on_line.max_by_key(|d| d.severity) {
                 write!(out, "●").ok();
-                match d.severity {
+                return Some(match diagnostic.severity {
                     Some(Severity::Error) => error,
                     Some(Severity::Warning) | None => warning,
                     Some(Severity::Info) => info,
                     Some(Severity::Hint) => hint,
-                }
-            })
+                });
+            }
+
+            if editor.has_lean_goals_accomplished(doc, line) {
+                write!(out, "✓").ok();
+                return Some(info);
+            }
+
+            None
         },
     )
 }
