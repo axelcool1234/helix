@@ -1955,7 +1955,7 @@ indent = { tab-width = 2, unit = "  " }
 
 [[grammar]]
 name = "perl"
-source = { git = "https://github.com/tree-sitter-perl/tree-sitter-perl", rev = "72a08a496a23212f23802490ef6f4700d68cfd0e" }
+source = { git = "https://github.com/tree-sitter-perl/tree-sitter-perl", rev = "6e8457739ef08561a2dc029ab44c89c3268adc86" }
 
 [[language]]
 name = "embedded-perl"
